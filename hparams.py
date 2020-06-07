@@ -7,7 +7,7 @@ seed=1234
 n_gpus=2
 output_directory = 'training_log'
 log_directory = 'transformer-tts-phone'
-data_path = '/media/disk1/lyh/LJSpeech-1.1/preprocessed'
+data_path = '../Dataset/lyh/LJSpeech-1.1/preprocessed'
 teacher_path = '/media/disk1/lyh/fastspeech_phone'
 
 training_files='filelists/ljs_audio_text_train_filelist.txt'
@@ -36,9 +36,8 @@ hidden_dim=256
 dprenet_dim=256
 postnet_dim=256
 ff_dim=1024
-n_heads=4
+n_heads=2
 n_layers=6
-n_postnet_layers=5
 
 
 ################################
