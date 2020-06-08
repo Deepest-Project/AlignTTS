@@ -6,6 +6,21 @@ from .transformer import *
 from utils.utils import get_mask_from_lengths
 
 
+class Prenet(nn.Module):
+    def __init__(self, hp):
+        super(Prenet, self).__init__()
+        self.Embedding = nn.Embedding(hp.n_symbols, hp.symbols_embedding_dim)
+        self.register_buffer('pe', PositionalEncoding(hp.hidden_dim).pe)
+        self.dropout = nn.Dropout(0.1)
+
+    def forward(self, text):
+        B, L = text.size(0), text.size(1)
+        x = self.Embedding(text).transpose(0,1)
+        x += self.pe[:L].unsqueeze(1)
+        x = self.dropout(x).transpose(0,1)
+        return x
+
+    
 class FFT(nn.Module):
     def __init__(self, hidden_dim, n_heads, ff_dim, n_layers):
         super(FFT, self).__init__()
@@ -16,69 +31,43 @@ class FFT(nn.Module):
 
     def forward(self, x, lengths):
         alignments = []
+        x = x.transpose(0,1)
         mask = get_mask_from_lengths(lengths)
         for layer in self.FFT_layers:
             x, align = layer(x, src_key_padding_mask=mask)
             alignments.append(align.unsqueeze(1))
         alignments = torch.cat(alignments, 1)
 
-        return x, alignments
-
-
-class MixDensityNetwork(nn.Module):
-    def __init__(self, hp):
-        super(MixDensityNetwork, self).__init__()
-        self.linear = nn.ModuleList([Linear(hp.hidden_dim, 256),
-                                     nn.LayerNorm(256),
-                                     nn.ReLU(),
-                                     nn.Dropout(0.1),
-                                     Linear(256, 2*hp.n_mel_channels),
-                                     nn.LayerNorm(2*hp.n_mel_channels),
-                                     nn.ReLU()])
-
-    def forward(self, hidden_states):
-        mu_sigma = self.linear(hidden_states)
-        return mu_sigma
-
+        return x.transpose(0,1), alignments
 
 class DurationPredictor(nn.Module):
-    def __init__(self, hidden_dim, n_heads, ff_dim, n_layers):
+    def __init__(self, hp):
         super(DurationPredictor, self).__init__()
-        self.FFT = FFT(hidden_dim, n_heads, ff_dim, n_layers)
-        self.linear = Linear(hidden_dim,hidden_dim)
+        self.FFT = FFT(hp.hidden_dim, hp.n_heads, hp.ff_dim, hp.n_layers)
+        self.linear = Linear(hp.hidden_dim, 1)
 
     def forward(self, encoder_input, text_lengths):
-        durations = self.linear(self.FFT(encoder_input, text_lengths))
-        return durations
-    
+        x = encoder_input.transpose(0,1)
+        x = self.FFT(encoder_input, text_lengths).transpose(0,1)
+        x = self.linear(x)
+        return x
 
 class Model(nn.Module):
     def __init__(self, hp):
         super(Model, self).__init__()
         self.hp = hp
-        self.Embedding = nn.Embedding(hp.n_symbols, hp.symbols_embedding_dim)
-        self.register_buffer('pe', PositionalEncoding(hp.hidden_dim).pe)
-        self.dropout = nn.Dropout(0.1)
-        
+        self.Prenet = Prenet(hp)
         self.FFT_lower = FFT(hp.hidden_dim, hp.n_heads, hp.ff_dim, hp.n_layers)
         self.FFT_upper = FFT(hp.hidden_dim, hp.n_heads, hp.ff_dim, hp.n_layers)
-        self.MDN = MixDensityNetwork(hp)
-        self.DurationPredictor = DurationPredictor(hp.hidden_dim, hp.n_heads, hp.ff_dim, hp.n_layers)
-        self.Projection = Linear(hp.hidden_dim, hp.n_mel_channels)
-        
-        
-    def get_hidden_states(self, text, text_lengths):
-        ### Size ###
-        B, L, T = text.size(0), text.size(1), melspec.size(2)
-        
-        ### Prepare Encoder Input ###
-        encoder_input = self.Embedding(text).transpose(0,1)
-        encoder_input += self.pe[:L].unsqueeze(1)
-        encoder_input = self.dropout(encoder_input)
-        hidden_states, enc_alignments = FFT_lower(encoder_input, text_lengths)
-        
-        return hidden_states, enc_alignments
-    
+        self.MDN = nn.ModuleList([Linear(hp.hidden_dim, 256),
+                                  nn.LayerNorm(256),
+                                  nn.ReLU(),
+                                  nn.Dropout(0.1),
+                                  Linear(256, 2*hp.n_mel_channels)])
+        self.DurationPredictor = DurationPredictor(hp)
+        self.Projection = Linear(hp.hidden_dim,
+                                 hp.n_mel_channels)
+
     def get_mu_sigma(self, hidden_states):
         mu_sigma = self.MDN(hidden_states)
         return mu_sigma
@@ -87,57 +76,51 @@ class Model(nn.Module):
         durations = self.DurationPredictor(encoder_input, text_lengths)
         return durations
     
-    def get_melspec(self, hidden_states, text_lengths)
+    def get_melspec(self, hiddens_states, durations, mel_lengths, inference=False):
+        hidden_states = hidden_states.transpose(0,1)
+        hidden_states_expanded = self.LR(hidden_states, durations, alpha, inference=inference)
+        hidden_states_expanded += self.Prenet.pe[:hidden_states_expanded.size(0)].unsqueeze(1)
+        mel_out = self.Projection(self.FFT_upper(hidden_states_expanded, mel_lengths).transpose(0,1)).transpose(1,2)
+        return mel_out
     
-    def forward(self, text, melspec, gate, text_lengths, mel_lengths, criterion, step):
-        hidden_states = get_hidden_states(self, text, text_lengths)
-        
-        if step==0:
-            mu_sigma=get_mu_sigma(self, hidden_states)
-            mdn_loss = MDN_LOSS(mu_sigma, melspec)
+    def forward(self, text, melspec, durations, text_lengths, mel_lengths, criterion, stage):
+        if stage==0:
+            encoder_input = self.Prenet(text)
+            hidden_states, _ = self.FFT_lower(encoder_input, text_lengths)
+            mu_sigma = self.get_mu_sigma(hidden_states)
+            mdn_loss = criterion(mu_sigma, melspec, mel_lengths)
             return mdn_loss
         
         elif step==1:
-            ## return FFT_LOSS
+            encoder_input = self.Prenet(text)
+            hidden_states, _ = FFT_lower(encoder_input, text_lengths)
+            mel_out = get_melspec(hidden_states, durations, mel_lengths)
+            fft_loss = nn.L1Loss()(mel_out, melspec)
+            return fft_loss
+        
         elif step==2:
-            ## return MDN_LOSS + FFT_LOSS
+            encoder_input = self.Prenet(text)
+            hidden_states, _ = self.FFT_lower(encoder_input, text_lengths)
+            mu_sigma = self.get_mu_sigma(hidden_states)
+            mdn_loss = criterion(mu_sigma, melspec, mel_lengths)
+            
+            mel_out = self.get_melspec(hidden_states, durations, mel_lengths)
+            fft_loss = nn.L1Loss()(mel_out, melspec)
+            return mdn_loss + fft_loss
+        
         elif step==3:
-            ## return duration_LOSS
+            encoder_input = self.Prenet(text)
+            durations_out = self.get_duration(encoder_input, text_lengths)
+            duration_loss = nn.L2Loss(torch.log(durations_out), torch.log(durations))
+            return duration_loss
         
     def inference(self, text, alpha=1.0):
-        ### Prepare Inference ###
         text_lengths = torch.tensor([1, text.size(1)])
-        
-        ### Prepare Inputs ###
-        encoder_input = self.Embedding(text).transpose(0,1)
-        encoder_input += self.pe[:text.size(1)].unsqueeze(1)
-        
-        ### Speech Synthesis ###
-        text_mask = text.new_zeros(1,text.size(1)).to(torch.bool)
-        hidden_states = self.FFT_lower(encoder_input, text_lengths)
-            
-        ### Duration Predictor ###
-        durations = self.DurationPredictor(hidden_states.transpose(0,1))
-        hidden_states_expanded = self.LR(hidden_states, durations, alpha, inference=True)
-        hidden_states_expanded += self.pe[:hidden_states_expanded.size(0)].unsqueeze(1)
-        mel_lengths = hidden_states_expanded.size(0)
-        
-        hidden_states_expanded = self.FFT_upper(hidden_states_expanded, mel_lengths)
-        mel_out = self.Projection(hidden_states_expanded.transpose(0,1)).transpose(1,2)
-        
+        encoder_input = self.Prenet(text)
+        hidden_states, _ = self.FFT_lower(encoder_input, text_lengths)
+        durations = self.get_duration(encoder_input, text_lengths)
+        mel_out = self.get_melspec(hidden_states, durations, mel_lengths, inference=True)
         return mel_out, durations
-
-    
-    def align2duration(self, alignments, mel_mask):
-        ids = alignments.new_tensor( torch.arange(alignments.size(2)) )
-        max_ids = torch.max(alignments, dim=2)[1].unsqueeze(-1)
-        
-        one_hot = 1.0*(ids==max_ids)
-        one_hot.masked_fill_(mel_mask.unsqueeze(2), 0)
-        
-        durations = torch.sum(one_hot, dim=1)
-
-        return durations
     
     
     def LR(self, hidden_states, durations, alpha=1.0, inference=False):
