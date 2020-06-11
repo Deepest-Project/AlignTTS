@@ -59,11 +59,11 @@ class Model(nn.Module):
         self.Prenet = Prenet(hp)
         self.FFT_lower = FFT(hp.hidden_dim, hp.n_heads, hp.ff_dim, hp.n_layers)
         self.FFT_upper = FFT(hp.hidden_dim, hp.n_heads, hp.ff_dim, hp.n_layers)
-        self.MDN = nn.ModuleList([Linear(hp.hidden_dim, 256),
-                                  nn.LayerNorm(256),
-                                  nn.ReLU(),
-                                  nn.Dropout(0.1),
-                                  Linear(256, 2*hp.n_mel_channels)])
+        self.MDN = nn.Sequential(Linear(hp.hidden_dim, 256),
+                                 nn.LayerNorm(256),
+                                 nn.ReLU(),
+                                 nn.Dropout(0.1),
+                                 Linear(256, 2*hp.n_mel_channels))
         self.DurationPredictor = DurationPredictor(hp)
         self.Projection = Linear(hp.hidden_dim,
                                  hp.n_mel_channels)
@@ -88,8 +88,8 @@ class Model(nn.Module):
             encoder_input = self.Prenet(text)
             hidden_states, _ = self.FFT_lower(encoder_input, text_lengths)
             mu_sigma = self.get_mu_sigma(hidden_states)
-            mdn_loss = criterion(mu_sigma, melspec, mel_lengths)
-            return mdn_loss
+            mu, sigma = criterion(mu_sigma, melspec, text_lengths, mel_lengths)
+            return mu, sigma
         
         elif step==1:
             encoder_input = self.Prenet(text)
