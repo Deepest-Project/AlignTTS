@@ -6,7 +6,7 @@ from text import symbols
 seed=1234
 n_gpus=2
 output_directory = 'training_log'
-log_directory = 'transformer-tts-phone'
+log_directory = 'aligntts'
 data_path = '../Dataset/LJSpeech-1.1/preprocessed'
 
 training_files='filelists/ljs_audio_text_train_filelist.txt'

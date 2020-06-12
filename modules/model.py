@@ -90,7 +90,7 @@ class Model(nn.Module):
             encoder_input = self.Prenet(text)
             hidden_states, _ = self.FFT_lower(encoder_input, text_lengths)
             mu_sigma = self.get_mu_sigma(hidden_states)
-            mdn_loss = criterion(mu_sigma, melspec, text_lengths, mel_lengths)
+            mdn_loss, _ = criterion(mu_sigma, melspec, text_lengths, mel_lengths)
             return mdn_loss
         
         elif step==1:

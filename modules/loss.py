@@ -27,12 +27,12 @@ class MDNLoss(nn.Module):
         log_alpha[:,0, 0] = log_prob_matrix[:,0, 0]
         
         for t in range(1, T):
-            prev_step = torch.cat([log_alpha[:, :, t-1:t], F.pad(log_alpha[:, :, t-1:t], (0,0,1,-1))], dim=-1)
+            prev_step = torch.cat([log_alpha[:, :, t-1:t], F.pad(log_alpha[:, :, t-1:t], (0,0,1,-1), value=-1e15)], dim=-1)
             log_alpha[:, :, t] = torch.logsumexp(prev_step, dim=-1)+log_prob_matrix[:, :, t]
         
         alpha_last = torch.gather(log_alpha, -1, (mel_lengths-1).unsqueeze(-1).unsqueeze(-1).repeat(1, L, 1)).squeeze(-1)
         alpha_last = torch.gather(alpha_last, -1, (text_lengths-1).unsqueeze(-1))
         mdn_loss = -alpha_last.mean()
 
-        return mdn_loss
+        return mdn_loss, log_prob_matrix
         
