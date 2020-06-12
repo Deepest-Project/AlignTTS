@@ -65,8 +65,7 @@ class Model(nn.Module):
                                  nn.Dropout(0.1),
                                  Linear(256, 2*hp.n_mel_channels))
         self.DurationPredictor = DurationPredictor(hp)
-        self.Projection = Linear(hp.hidden_dim,
-                                 hp.n_mel_channels)
+        self.Projection = Linear(hp.hidden_dim, hp.n_mel_channels)
 
     def get_mu_sigma(self, hidden_states):
         mu_sigma = self.MDN(hidden_states)
@@ -84,12 +83,15 @@ class Model(nn.Module):
         return mel_out
     
     def forward(self, text, melspec, durations, text_lengths, mel_lengths, criterion, stage):
+        text = text[:,:text_lengths.max().item()]
+        melspec = melspec[:,:,:mel_lengths.max().item()]
+        
         if stage==0:
             encoder_input = self.Prenet(text)
             hidden_states, _ = self.FFT_lower(encoder_input, text_lengths)
             mu_sigma = self.get_mu_sigma(hidden_states)
-            mu, sigma, mdn_loss = criterion(mu_sigma, melspec, text_lengths, mel_lengths)
-            return mu, sigma, mdn_loss
+            mdn_loss = criterion(mu_sigma, melspec, text_lengths, mel_lengths)
+            return mdn_loss
         
         elif step==1:
             encoder_input = self.Prenet(text)
