@@ -65,13 +65,11 @@ class TextMelCollate():
 
         # include Spec padded and gate padded
         mel_padded = torch.zeros(len(batch), num_mels, max_target_len)
-        gate_padded = torch.zeros(len(batch), max_target_len)
         output_lengths = torch.LongTensor(len(batch))
         for i in range(len(ids_sorted_decreasing)):
             mel = batch[ids_sorted_decreasing[i]][1]
             mel_padded[i, :, :mel.size(1)] = mel
-            gate_padded[i, mel.size(1)-1:] = 1
             output_lengths[i] = mel.size(1)
 
         
-        return text_padded, input_lengths, mel_padded, output_lengths, gate_padded
+        return text_padded, input_lengths, mel_padded, output_lengths

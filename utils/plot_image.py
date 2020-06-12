@@ -4,8 +4,8 @@ import hparams
 import matplotlib.pyplot as plt
 
 
-def plot_melspec(target, melspec, melspec_post, mel_lengths):
-    fig, axes = plt.subplots(3, 1, figsize=(20,30))
+def plot_melspec(target, melspec, mel_lengths):
+    fig, axes = plt.subplots(2, 1, figsize=(20,20))
     T = mel_lengths[-1]
 
     axes[0].imshow(target[-1][:,:T],
@@ -13,10 +13,6 @@ def plot_melspec(target, melspec, melspec_post, mel_lengths):
                    aspect='auto')
 
     axes[1].imshow(melspec[-1][:,:T],
-                   origin='lower',
-                   aspect='auto')
-
-    axes[2].imshow(melspec_post[-1][:,:T],
                    origin='lower',
                    aspect='auto')
 
