@@ -1,0 +1,5 @@
+training_log/
+.ipynb_checkpoints/
+__pycache__/
+*.pyc
+*.out
