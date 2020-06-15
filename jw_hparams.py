@@ -26,6 +26,7 @@ hparams.update({
     'num_MDN_layers': 6,
     'MDN_dim': 128,
     'MDN_dropout_rate': 0.2,
+    'eps': 1e-8,
 })
 
 hparams.update({
