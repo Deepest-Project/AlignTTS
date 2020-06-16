@@ -85,12 +85,11 @@ class Model(nn.Module):
     def forward(self, text, melspec, durations, text_lengths, mel_lengths, criterion, stage):
         text = text[:,:text_lengths.max().item()]
         melspec = melspec[:,:,:mel_lengths.max().item()]
-        
         if stage==0:
             encoder_input = self.Prenet(text)
             hidden_states, _ = self.FFT_lower(encoder_input, text_lengths)
             mu_sigma = self.get_mu_sigma(hidden_states)
-            mdn_loss, _ = criterion(mu_sigma, melspec, text_lengths, mel_lengths)
+            mdn_loss, _, _, _ = criterion(mu_sigma, melspec, text_lengths, mel_lengths)
             return mdn_loss
         
         elif step==1:
