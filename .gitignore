@@ -3,3 +3,4 @@ training_log/
 __pycache__/
 *.pyc
 *.out
+runs/

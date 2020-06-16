@@ -22,9 +22,38 @@ from text import cmudict
 from text.cleaners import custom_english_cleaners
 from text.symbols import symbols
 
+import jamotools
+
+_pad        = '_'
+_sos        = '^'
+_eos        = '~'
+_punctuations = " ,.'?!"
+_choseong = ''.join([chr(i) for i in range(0x1100, 0x1113)])
+_jungseong = ''.join([chr(i) for i in range(0x1161, 0x1176)])
+_jongseong = ''.join([chr(i) for i in range(0x11A8, 0x11C3)])
+
+# Export all symbols:
+symbols_kor = [_pad, _sos, _eos] + list(_punctuations) + list(_choseong) + list(_jungseong) + list(_jongseong) 
+
 import librosa
 import numpy as np
 from scipy.signal import stft
+
+hparams.update({
+    'metadata_path': '../Dataset/kss/transcript.v.1.4.txt',
+    'wav_base_path': '../Dataset/kss/',
+})
+
+hparams.update({
+    'language': 'kor',
+    'fs': 44100,
+})
+
+hparams.update({
+    'nsc': int(hparams['nsc_in_sec'] * hparams['fs']),
+    'hop': int(hparams['hop_in_sec'] * hparams['fs']),
+    'nov': int(hparams['nov_in_sec'] * hparams['fs']),
+})
 
 Metadatum = namedtuple('metadatum', ('file_path', 'text'))
 
@@ -32,27 +61,43 @@ Metadatum = namedtuple('metadatum', ('file_path', 'text'))
 SYMBOL2ID = {s: i for i, s in enumerate(symbols)}
 ID2SYMBOL = {i: s for i, s in enumerate(symbols)}
 
+SYMBOL2ID_KOR = {s: i for i, s in enumerate(symbols_kor)}
+ID2SYMBOL_KOR = {i: s for i, s in enumerate(symbols_kor)}
+
 g2p = G2p()
 
 MEL_BANDS = librosa.filters.mel(sr=hparams['fs'], n_fft=hparams['nsc'], 
                                 n_mels = hparams['n_mels'])
 
-def text2phoneme(text): 
-    clean_char = custom_english_cleaners(text.rstrip())
-    clean_char = clean_char.replace('..', '.')
-    clean_phone = []
-    for s in g2p(clean_char.lower()):
-        if '@'+s in SYMBOL2ID:
-            clean_phone.append('@'+s)
-        else:
-            clean_phone.append(s)
+def text2phoneme(text, lang='eng'): 
+    if lang == 'eng':
+        clean_char = custom_english_cleaners(text.rstrip())
+        clean_char = clean_char.replace('..', '.')
+        clean_phone = []
+        for s in g2p(clean_char.lower()):
+            if '@'+s in SYMBOL2ID:
+                clean_phone.append('@'+s)
+            else:
+                clean_phone.append(s)
+    elif lang == 'kor':
+        clean_phone = [c for c in text]
+    else:
+        raise "Unknown Language"
 
     return clean_phone
 
-def phoneme2seq(phoneme):
-    sequence = [SYMBOL2ID['^']]
-    sequence.extend([SYMBOL2ID[c] for c in phoneme])
-    sequence.append(SYMBOL2ID['~'])
+def phoneme2seq(phoneme, lang='eng'):
+    if lang == 'eng':
+        sequence = [SYMBOL2ID['^']]
+        sequence.extend([SYMBOL2ID[c] for c in phoneme])
+        sequence.append(SYMBOL2ID['~'])
+    elif lang == 'kor':
+        sequence = [SYMBOL2ID_KOR['^']]
+        sequence.extend([SYMBOL2ID_KOR[c] for c in phoneme])
+        sequence.append(SYMBOL2ID_KOR['~'])
+    else:
+        raise "Unknown Error"
+
     return sequence
 
 class PhoneMelDataset(torch.utils.data.Dataset):
@@ -62,8 +107,8 @@ class PhoneMelDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         file_path, text = self.metadata_list[idx]
-        phoneme = text2phoneme(text)
-        seq = phoneme2seq(phoneme)
+        phoneme = text2phoneme(text, hparams['language'])
+        seq = phoneme2seq(phoneme, hparams['language'])
         mel = load_mel_spectrogram(file_path, self.fs)
 
         return (seq, mel)
@@ -78,8 +123,13 @@ def load_metadata(metadata_path, base_path=''):
     with open(metadata_path, 'r') as file:
         
         for i, line in enumerate(file):
-            file, _, text = line.strip().split('|')
-            metadatum = Metadatum(os.path.join(base_path, file) + '.wav', text)
+            if hparams['language'] == 'eng':
+                file, _, text = line.strip().split('|')
+                metadatum = Metadatum(os.path.join(base_path, file) + '.wav', text)
+            elif hparams['language'] == 'kor':
+                file, _, _, text, _, _ = line.strip().split('|')
+                text = jamotools.split_syllables(text, jamo_type="JAMO")
+                metadatum = Metadatum(os.path.join(base_path, file), text)
             metadata_list.append(metadatum)
             # print(file, text)
             # print(text2phoneme(text))
@@ -176,7 +226,6 @@ class Model(torch.nn.Module):
         mdn_loss = get_mdn_loss(logp_matrix)
 
         return mdn_loss 
-
 
 def get_logp_matrix(seq_tensor, mel_tensor):
 
@@ -292,7 +341,6 @@ def get_mdn_loss(logp_matrix):
 
     return mdn_loss # (B)
 
-
 class MDNLinearLayer(torch.nn.Module):
     '''
     (B, L, H)
@@ -333,7 +381,6 @@ class MDNLinearLayer(torch.nn.Module):
         tensor = tensor.permute(0, 2, 1) # (N, H, L) -> (N, L, H)
 
         return tensor
-
 
 class FFT(torch.nn.Module):
 
@@ -386,7 +433,7 @@ def main():
 
     writer = SummaryWriter()
 
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 
     torch.autograd.set_detect_anomaly(True)
 

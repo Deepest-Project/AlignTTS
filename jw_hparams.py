@@ -2,6 +2,10 @@
 hparams = dict()
 
 hparams.update({
+    'language': 'Eng',
+})
+
+hparams.update({
     'metadata_path': '../Dataset/LJSpeech-1.1/metadata.csv',
     'wav_base_path': '../Dataset/LJSpeech-1.1/wavs',
 })
@@ -15,7 +19,7 @@ hparams.update({
 
 hparams.update({
     'num_workers': 4,
-    'batch_size': 16,
+    'batch_size': 64,
     # 'embedding_dim': 384,
     'embedding_dim': 768,
     # 'FFT_dim': 384,
