@@ -2,10 +2,10 @@
 Implementation of the [AlignTTS](https://arxiv.org/abs/2003.01950)  
 
 # Figures
-- MDN Loss  
+## MDN Loss  
 <img src="figures/mdn loss.JPG">  
 
-- MDN Sample  
+## MDN Sample  
 <img src="figures/mdn sample.JPG">  
 
 # Minutes
