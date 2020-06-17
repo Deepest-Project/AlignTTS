@@ -6,6 +6,7 @@ from utils.utils import get_mask_from_lengths
 from torch.distributions import MultivariateNormal
 import math
 
+
 class MDNLoss(nn.Module):
     def __init__(self):
         super(MDNLoss, self).__init__()
@@ -20,8 +21,6 @@ class MDNLoss(nn.Module):
         sigma = torch.exp(mu_sigma[:, :, hp.n_mel_channels:].unsqueeze(2)) # B, L, 1, F
     
         exponential = -0.5*torch.sum((x-mu)*(x-mu)/sigma**2, dim=-1) # B, L, T
-        #coef = (2*math.pi)**(hp.n_mel_channels/2) * torch.prod(sigma, dim=-1)**0.5 # B, L, 1
-        #log_prob_matrix = (exponential - torch.log(coef)) # B, L, T
         log_prob_matrix = exponential - (hp.n_mel_channels/2)*torch.log(torch.tensor(2*math.pi)) - 0.5 * torch.log(sigma).sum(dim=-1)
         log_alpha = mu_sigma.new_ones(B, L, T)*(-1e30)
         log_alpha[:,0, 0] = log_prob_matrix[:,0, 0]
@@ -30,8 +29,7 @@ class MDNLoss(nn.Module):
             prev_step = torch.cat([log_alpha[:, :, t-1:t], F.pad(log_alpha[:, :, t-1:t], (0,0,1,-1), value=-1e30)], dim=-1)
             log_alpha[:, :, t] = torch.logsumexp(prev_step+1e-30, dim=-1)+log_prob_matrix[:, :, t]
         
-        alpha_last = torch.gather(log_alpha, -1, (mel_lengths-1).unsqueeze(-1).unsqueeze(-1).repeat(1, L, 1)).squeeze(-1)
-        alpha_last = torch.gather(alpha_last, -1, (text_lengths-1).unsqueeze(-1))
+        alpha_last = log_alpha[torch.arange(B), text_lengths-1, mel_lengths-1]
         mdn_loss = -alpha_last.mean()
 
         return mdn_loss, log_prob_matrix, log_alpha, alpha_last
