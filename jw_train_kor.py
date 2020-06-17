@@ -39,22 +39,6 @@ import librosa
 import numpy as np
 from scipy.signal import stft
 
-hparams.update({
-    'metadata_path': '../Dataset/kss/transcript.v.1.4.txt',
-    'wav_base_path': '../Dataset/kss/',
-})
-
-hparams.update({
-    'language': 'kor',
-    'fs': 44100,
-})
-
-hparams.update({
-    'nsc': int(hparams['nsc_in_sec'] * hparams['fs']),
-    'hop': int(hparams['hop_in_sec'] * hparams['fs']),
-    'nov': int(hparams['nov_in_sec'] * hparams['fs']),
-})
-
 Metadatum = namedtuple('metadatum', ('file_path', 'text'))
 
 # Mappings from symbol to numeric ID and vice versa:
@@ -187,12 +171,34 @@ def load_wav_file(wav_path, fs=None):
 
     return y, sr
 
+
+def get_pe_table(depth):
+
+    assert depth % 2 == 0, f'depth should be multiple of two, depth == {depth}'
+
+    pe_table = torch.zeros([10000, depth], requires_grad=False) # (T, H)
+
+    pos_tensor = torch.tensor([pos for pos in range(10000)]).unsqueeze(1) # (10000, 1)
+    freq_tensor = torch.tensor([np.power(freq, 2 * i/depth) for i, freq in enumerate(range(int(depth/2)))]) # (depth)
+
+    phase_tensor = pos_tensor / freq_tensor
+
+    pe_table[:, 0::2] = torch.sin(phase_tensor)
+    pe_table[:, 1::2] = torch.cos(phase_tensor)
+
+    pe_table.unsqueeze_(1)
+
+    return pe_table
+
+
 class Model(torch.nn.Module):
 
     def __init__(self, hparams):
         super(Model, self).__init__()
         self.embedding_layer = nn.Embedding(len(SYMBOL2ID), 
                                     hparams['embedding_dim'], padding_idx=0)
+
+        self.register_buffer('PE_TABLE', get_pe_table(hparams['embedding_dim']))
 
         self.fft_layers = nn.ModuleList([FFT(hparams) for i  in range(hparams['num_FFT_blocks'])])
 
@@ -202,6 +208,10 @@ class Model(torch.nn.Module):
     def forward(self, seq_batch, mel_batch):
 
         seq_tensor = self.embedding_layer(seq_batch) # (T, B) -> (T, B, H)
+
+        T, B, H = seq_tensor.shape
+
+        seq_tensor += self.PE_TABLE[:T, :, :]
 
         for fft_layer in self.fft_layers:
             seq_tensor = fft_layer(seq_tensor) # (T, B, H) -> (T, B, H)
@@ -296,7 +306,8 @@ def get_mdn_loss(logp_matrix):
     a_matrix[:, 0, 0] = logp_matrix[:, 0, 0]
 
     for j in range(1, T):
-        prev_step = torch.stack([a_matrix[:, :, j-1:j], F.pad(a_matrix[:, :, j-1:j], (1,-1, 0, 0))], dim=-1)
+        # prev_step = torch.stack([a_matrix[:, :, j-1:j], F.pad(a_matrix[:, :, j-1:j], (1,-1, 0, 0))], dim=-1)
+        prev_step = torch.stack([a_matrix[:, :, j-1:j], F.pad(a_matrix[:, :, j-1:j], (0, 0, 1, -1), value=1e-15)], dim=-1)
         a_matrix[:, :, j:j+1] = logp_matrix[:, :, j:j+1] + torch.logsumexp(prev_step, dim=-1)
 
 
@@ -433,7 +444,7 @@ def main():
 
     writer = SummaryWriter()
 
-    device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+    device = torch.device(hparams['gpu_device'] if torch.cuda.is_available() else "cpu")
 
     torch.autograd.set_detect_anomaly(True)
 

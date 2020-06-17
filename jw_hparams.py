@@ -2,7 +2,8 @@
 hparams = dict()
 
 hparams.update({
-    'language': 'Eng',
+    'language': 'eng',
+    # 'language': 'kor',
 })
 
 hparams.update({
@@ -15,6 +16,7 @@ hparams.update({
     'nsc_in_sec': 0.04,
     'hop_in_sec': 0.01,
     'n_mels': 80,  
+    'gpu_device': 'cuda:0',
 })
 
 hparams.update({
@@ -42,5 +44,24 @@ hparams.update({
     'hop': int(hparams['hop_in_sec'] * hparams['fs']),
     'nov': int(hparams['nov_in_sec'] * hparams['fs']),
 })
+
+if hparams['language'] == 'kor':
+
+    hparams.update({
+        'metadata_path': '../Dataset/kss/transcript.v.1.4.txt',
+        'wav_base_path': '../Dataset/kss/',
+    })
+
+    hparams.update({
+        'fs': 44100,
+        'batch_size': 128,
+        'gpu_device': 'cuda:1',
+    })
+
+    hparams.update({
+        'nsc': int(hparams['nsc_in_sec'] * hparams['fs']),
+        'hop': int(hparams['hop_in_sec'] * hparams['fs']),
+        'nov': int(hparams['nov_in_sec'] * hparams['fs']),
+    })
 
 print(hparams)

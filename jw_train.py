@@ -141,6 +141,7 @@ class Model(torch.nn.Module):
 
     def __init__(self, hparams):
         super(Model, self).__init__()
+
         self.embedding_layer = nn.Embedding(len(SYMBOL2ID), 
                                     hparams['embedding_dim'], padding_idx=0)
 
