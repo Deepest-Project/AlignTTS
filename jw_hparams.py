@@ -17,6 +17,7 @@ hparams.update({
     'hop_in_sec': 0.01,
     'n_mels': 80,  
     'gpu_device': 'cuda:0',
+    'lr': 1e-4,
 })
 
 hparams.update({
@@ -56,6 +57,7 @@ if hparams['language'] == 'kor':
         'fs': 44100,
         'batch_size': 128,
         'gpu_device': 'cuda:1',
+        'lr': 1e-3,
     })
 
     hparams.update({

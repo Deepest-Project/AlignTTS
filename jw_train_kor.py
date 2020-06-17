@@ -86,7 +86,8 @@ def phoneme2seq(phoneme, lang='eng'):
 
 class PhoneMelDataset(torch.utils.data.Dataset):
     def __init__(self, metadata_list, fs):
-        self.metadata_list = metadata_list
+        self.metadata_list = sorted(metadata_list, 
+            key=lambda datum: len(getattr(datum, 'text')), reverse=True)
         self.fs = fs
 
     def __getitem__(self, idx):
@@ -233,9 +234,9 @@ class Model(torch.nn.Module):
 
         # print(logp_matrix)
 
-        mdn_loss = get_mdn_loss(logp_matrix)
+        mdn_loss, a_matrix = get_mdn_loss(logp_matrix)
 
-        return mdn_loss 
+        return mdn_loss, (logp_matrix, a_matrix)
 
 def get_logp_matrix(seq_tensor, mel_tensor):
 
@@ -350,7 +351,7 @@ def get_mdn_loss(logp_matrix):
     # print(mdn_loss.requires_grad)
     # print(mdn_loss.grad_fn)
 
-    return mdn_loss # (B)
+    return mdn_loss, a_matrix # (B)
 
 class MDNLinearLayer(torch.nn.Module):
     '''
@@ -364,17 +365,21 @@ class MDNLinearLayer(torch.nn.Module):
         if layer_order == 0:
             self.layer_dim = hparams['MDN_dim']
             self.linear = nn.Linear(hparams['FFT_dim'], self.layer_dim) # (N, *, H)
+            self.dropout_rate = hparams['MDN_dropout_rate']
         elif layer_order == hparams['num_MDN_layers'] - 1:
             self.layer_dim = 2 * hparams['n_mels']
             self.linear = nn.Linear(hparams['MDN_dim'], self.layer_dim) # (N, *, H)
+            self.dropout_rate = 0
         else:
             self.layer_dim = hparams['MDN_dim']
             self.linear = nn.Linear(hparams['MDN_dim'], self.layer_dim)
+            self.dropout_rate = hparams['MDN_dropout_rate']
+
 
         self.batch_norm = nn.BatchNorm1d(self.layer_dim) # (N, C, L)
         # self.relu = nn.ReLU()
         self.relu = nn.ReLU6()
-        self.dropout = nn.Dropout(hparams['MDN_dropout_rate'])
+        self.dropout = nn.Dropout(self.dropout_rate)
 
 
     def forward(self, input_tensor):
@@ -456,16 +461,19 @@ def main():
 
     data_loader = DataLoader(dataset,
                               num_workers=hparams['num_workers'],
-                              shuffle=True,
+                            #   shuffle=True,
+                              shuffle=False,
                               batch_size=hparams['batch_size'], 
                               drop_last=False,
                               collate_fn=batch_collate_func)
 
     model = Model(hparams).to(device)
 
-    optimizer = optim.Adam(model.parameters(), lr=0.0001)
+    optimizer = optim.Adam(model.parameters(), lr=hparams['lr'])
 
     n_iter = 0
+
+    model.train()
 
     for j in range(100):
         for i, (seq, mel) in enumerate(data_loader):
@@ -475,7 +483,7 @@ def main():
 
             optimizer.zero_grad()
 
-            loss_tensor = model(seq.to(device), mel.to(device))
+            loss_tensor, (logp_matrix, a_matrix) = model(seq.to(device), mel.to(device))
 
             loss = torch.mean(loss_tensor)
 
@@ -485,6 +493,8 @@ def main():
 
             if n_iter % 10 == 0:
                 writer.add_scalar('Loss/train', loss.item(), n_iter)
+                writer.add_image('log(p) matrix', logp_matrix[0, :, :], n_iter, dataformats='HW')
+                writer.add_image('alpha matrix', a_matrix[0, :, :], n_iter, dataformats='HW')
 
             # grad_norm = commons.clip_grad_value_(model.parameters(), 5)
             optimizer.step()
