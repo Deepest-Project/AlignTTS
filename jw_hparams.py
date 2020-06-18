@@ -30,10 +30,11 @@ hparams.update({
     'num_heads': 2,
     'kernel_size': 3,
     'num_FFT_blocks': 6,
-    'num_MDN_layers': 6,
-    'MDN_dim': 128,
-    'MDN_dropout_rate': 0.2,
+    'num_MDN_layers': 6, # YH used 1, and original paper is unknown.
+    'MDN_dim': 256,
+    'MDN_dropout_rate': 0.1,
     'eps': 1e-8,
+    'FFT_dropout_rate': 0.1,
 })
 
 hparams.update({
@@ -55,9 +56,9 @@ if hparams['language'] == 'kor':
 
     hparams.update({
         'fs': 44100,
-        'batch_size': 128,
+        'batch_size': 64,
         'gpu_device': 'cuda:1',
-        'lr': 1e-3,
+        'lr': 1e-4,
     })
 
     hparams.update({

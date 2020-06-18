@@ -217,18 +217,24 @@ class Model(torch.nn.Module):
         for fft_layer in self.fft_layers:
             seq_tensor = fft_layer(seq_tensor) # (T, B, H) -> (T, B, H)
 
+        # print(seq_tensor.shape)
+
         seq_tensor = seq_tensor.permute(1, 0, 2) # (T, B, H) -> (B, L, H)
+
+        # print(seq_tensor.shape)
 
         for mdn_layer in self.mdn_layers:
             seq_tensor = mdn_layer(seq_tensor) # (B, L, H) -> (B, L, H)
 
-        seq_tensor = torch.sigmoid(seq_tensor)
+        # seq_tensor = torch.sigmoid(seq_tensor)
 
         # print(seq_tensor[0, 0, :])
 
         # assert False
 
-        logp_matrix = get_logp_matrix(seq_tensor, mel_batch)
+        logp_matrix = get_logp_matrix(seq_tensor, mel_batch) # (B, L, T)
+
+        # logp_matrix = F.log_softmax(logp_matrix, dim=1) # (B, L, T)
 
         # print(logp_matrix)
 
@@ -246,10 +252,10 @@ def get_logp_matrix(seq_tensor, mel_tensor):
     logp (B, L, T)
     '''
 
-    mu_tensor = seq_tensor[:, :, :hparams['n_mels']] # (B, L, Mel)
+    mu_tensor = torch.sigmoid(seq_tensor[:, :, :hparams['n_mels']]) # (B, L, Mel)
     # log_sig_tensor = seq_tensor[:, :, hparams['n_mels']:] # (B, L, Mel)
     # sig_sqr_reciprocal_tensor = torch.exp(-2 * log_sig_tensor) # (B, L, Mel)
-    sig_tensor = seq_tensor[:, :, hparams['n_mels']:] # (B, L, Mel)
+    sig_tensor = torch.exp(seq_tensor[:, :, hparams['n_mels']:]) # (B, L, Mel)
     log_sig_tensor = torch.log(sig_tensor) # (B, L, Mel)
     sig_sqr_reciprocal_tensor = torch.reciprocal(sig_tensor ** 2)
 
@@ -339,7 +345,7 @@ def get_mdn_loss(logp_matrix):
 
     print(a_matrix.shape)
 
-    print(torch.tensor(L-1).to(device).repeat(B, T, 1).shape)
+    # print(torch.tensor(L-1).to(device).repeat(B, T, 1).shape)
 
     alpha_last = torch.gather(a_matrix, -1, torch.tensor(T-1).to(device).repeat(B, L, 1)) # (B, L, T) -> (B, L, 1)
     alpha_last = alpha_last.squeeze(-1) # (B, L, 1) -> (B, L)
@@ -366,35 +372,43 @@ class MDNLinearLayer(torch.nn.Module):
             self.layer_dim = hparams['MDN_dim']
             self.linear = nn.Linear(hparams['FFT_dim'], self.layer_dim) # (N, *, H)
             self.dropout_rate = hparams['MDN_dropout_rate']
+            self.layer_norm = nn.LayerNorm(self.layer_dim) # (N, L, C)
+            self.relu = nn.ReLU6()
         elif layer_order == hparams['num_MDN_layers'] - 1:
             self.layer_dim = 2 * hparams['n_mels']
             self.linear = nn.Linear(hparams['MDN_dim'], self.layer_dim) # (N, *, H)
             self.dropout_rate = 0
+            self.layer_norm = nn.Identity() # (N, L, C)
+            self.relu = nn.Identity()
         else:
             self.layer_dim = hparams['MDN_dim']
             self.linear = nn.Linear(hparams['MDN_dim'], self.layer_dim)
             self.dropout_rate = hparams['MDN_dropout_rate']
+            self.relu = nn.ReLU6()
+            self.layer_norm = nn.LayerNorm(self.layer_dim) # (N, L, C)
 
-
-        self.batch_norm = nn.BatchNorm1d(self.layer_dim) # (N, C, L)
+        # self.batch_norm = nn.BatchNorm1d(self.layer_dim) # (N, C, L)
+        
         # self.relu = nn.ReLU()
-        self.relu = nn.ReLU6()
         self.dropout = nn.Dropout(self.dropout_rate)
 
 
     def forward(self, input_tensor):
 
+        # print(input_tensor.shape)
+
         tensor = self.linear(input_tensor) # (N, L, H)
 
-        tensor = tensor.permute(0, 2, 1) # (N, L, H) -> (N, H, L)
+        # tensor = tensor.permute(0, 2, 1) # (N, L, H) -> (N, H, L)
+        # tensor = self.batch_norm(tensor) # (N, H, L)
 
-        tensor = self.batch_norm(tensor) # (N, H, L)
+        tensor = self.layer_norm(tensor) # (N, L, H)
 
         tensor = self.relu(tensor) # (N, H, L)
 
         tensor = self.dropout(tensor) # (N, H, L)
 
-        tensor = tensor.permute(0, 2, 1) # (N, H, L) -> (N, L, H)
+        # tensor = tensor.permute(0, 2, 1) # (N, H, L) -> (N, L, H)
 
         return tensor
 
@@ -416,31 +430,47 @@ class FFT(torch.nn.Module):
         self.multihead_attention = nn.MultiheadAttention(hparams['embedding_dim'], 
             num_heads=hparams['num_heads'], dropout=0.0, bias=True)
 
-        self.batch_norm = nn.BatchNorm1d(hparams['FFT_dim'])
+        # self.batch_norm = nn.BatchNorm1d(hparams['FFT_dim'])
+        self.layer_norm = nn.LayerNorm(hparams['FFT_dim'])
 
-        self.conv_1d = nn.Conv1d(hparams['FFT_dim'], hparams['FFT_dim'], 
+        self.conv_1d_1 = nn.Conv1d(hparams['FFT_dim'], hparams['FFT_dim'], 
             kernel_size = hparams['kernel_size'], padding = 1) # (N, C, L) -> (N, C, L)
 
-        self.batch_norm_2 = nn.BatchNorm1d(hparams['FFT_dim'])
+        self.conv_1d_2 = nn.Conv1d(hparams['FFT_dim'], hparams['FFT_dim'], 
+            kernel_size = hparams['kernel_size'], padding = 1) # (N, C, L) -> (N, C, L)
+
+        # self.batch_norm_2 = nn.BatchNorm1d(hparams['FFT_dim'])
+        self.layer_norm_2 = nn.LayerNorm(hparams['FFT_dim'])
+
+        self.dropout = nn.Dropout(hparams['FFT_dropout_rate'])
+
 
     def forward(self, input_tensor):
 
         tensor, attention = self.multihead_attention(input_tensor, input_tensor, input_tensor) # (L, N, E) -> (L, N, E)
 
-        tensor = tensor + input_tensor # (T, B, H) + (T, B, H)
+        # YH added dropout at attention output
+        tensor = self.dropout(tensor) + input_tensor # (T, B, H) + (T, B, H)
 
-        tensor = tensor.permute(1, 2, 0) # (T, B, H) => (B, H, T)
+        # tensor = tensor.permute(1, 2, 0) # (T, B, H) => (B, H, T)
+        # tensor_ = self.batch_norm(tensor) # (N, C, L)
+        
+        tensor_ = self.layer_norm(tensor)
+        tensor_ = tensor_.permute(1, 2, 0) # (T, B, H) => (B, H, T)
 
-        tensor_ = self.batch_norm(tensor) # (N, C, L)
+        tensor = self.dropout(F.relu(self.conv_1d_1(tensor_)))
 
-        tensor = self.conv_1d(tensor_)
+        tensor = self.dropout(F.relu(self.conv_1d_2(tensor)))
 
         tensor = tensor + tensor_
 
-        tensor = self.batch_norm_2(tensor) # (N, C, L)
+        # tensor = self.batch_norm_2(tensor) # (N, C, L)
+        # tensor = tensor.permute(2, 0, 1) # (B, H, T) -> (T, B, H)
 
-        tensor = tensor.permute(2, 0, 1) # (B, H, T) -> (T, B, H)
-
+        tensor = tensor.permute(0, 2, 1) # (B, H, T) -> (B, T, H)
+        tensor = self.layer_norm_2(tensor)
+        tensor = tensor.permute(1, 0, 2) # (B, T, H) -> (T, B, H)
+        
         return tensor
 
 from torch.utils.tensorboard import SummaryWriter
@@ -475,11 +505,14 @@ def main():
 
     model.train()
 
+    train_loss = list()
+    train_loss_norm = list()
+
     for j in range(100):
         for i, (seq, mel) in enumerate(data_loader):
 
             n_iter += 1
-            # print(seq.shape, mel.shape)
+            print(seq.shape, mel.shape)
 
             optimizer.zero_grad()
 
@@ -489,12 +522,24 @@ def main():
 
             loss.backward()
 
+            train_loss.append(loss.item())
+            train_loss_norm.append(loss.item() / mel.shape[0])
+
+            train_loss = train_loss[-10:]
+            train_loss_norm = train_loss_norm[-10:]
+
             print(loss.item())
 
+            F.log_softmax(logp_matrix, dim=1)
+
             if n_iter % 10 == 0:
-                writer.add_scalar('Loss/train', loss.item(), n_iter)
+                writer.add_scalar('Loss/train', np.mean(train_loss), n_iter)
+                writer.add_scalar('LossNorm/train', np.mean(train_loss_norm), n_iter)
                 writer.add_image('log(p) matrix', logp_matrix[0, :, :], n_iter, dataformats='HW')
+                writer.add_image('log soft log(p) matrix', F.log_softmax(logp_matrix[0, :, :], dim=0), n_iter, dataformats='HW')
                 writer.add_image('alpha matrix', a_matrix[0, :, :], n_iter, dataformats='HW')
+                writer.add_image('mel', mel.numpy()[:, 0, ::-1].T, n_iter, dataformats='HW')
+                # writer.add_text('input_text', %%%%%%%, n_iter)
 
             # grad_norm = commons.clip_grad_value_(model.parameters(), 5)
             optimizer.step()
