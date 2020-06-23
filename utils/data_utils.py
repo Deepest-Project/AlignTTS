@@ -17,24 +17,31 @@ def load_filepaths_and_text(metadata, split="|"):
 
 
 class TextMelSet(torch.utils.data.Dataset):
-    def __init__(self, audiopaths_and_text, hparams):
+    def __init__(self, audiopaths_and_text, hparams, stage):
         self.audiopaths_and_text = load_filepaths_and_text(audiopaths_and_text)
         random.seed(1234)
         random.shuffle(self.audiopaths_and_text)
         self.data_type=hparams.data_type
+        self.stage=stage
 
     def get_mel_text_pair(self, audiopath_and_text):
         # separate filename and text
         file_name = audiopath_and_text[0][:10]
         seq = os.path.join(hparams.data_path, self.data_type)
         mel = os.path.join(hparams.data_path, 'melspectrogram')
-
         with open(f'{seq}/{file_name}_sequence.pkl', 'rb') as f:
             text = pkl.load(f)
         with open(f'{mel}/{file_name}_melspectrogram.pkl', 'rb') as f:
             mel = pkl.load(f)
-
-        return (text, mel)
+        
+        if self.stage == 0:
+            return (text, mel)
+        
+        else:
+            align = os.path.join(hparams.data_path, 'alignments')
+            with open(f'{align}/{file_name}.pkl', 'rb') as f:
+                align = pkl.load(f)
+            return (text, mel, align)
 
     def __getitem__(self, index):
         return self.get_mel_text_pair(self.audiopaths_and_text[index])
@@ -44,7 +51,8 @@ class TextMelSet(torch.utils.data.Dataset):
 
 
 class TextMelCollate():
-    def __init__(self):
+    def __init__(self, stage):
+        self.stage=stage
         return
 
     def __call__(self, batch):
@@ -53,23 +61,44 @@ class TextMelCollate():
             torch.LongTensor([len(x[0]) for x in batch]),
             dim=0, descending=True)
         max_input_len = input_lengths[0]
-
-        text_padded = torch.zeros(len(batch), max_input_len, dtype=torch.long)
-        for i in range(len(ids_sorted_decreasing)):
-            text = batch[ids_sorted_decreasing[i]][0]
-            text_padded[i, :text.size(0)] = text
-
-        # Right zero-pad
-        num_mels = batch[0][1].size(0)
         max_target_len = max([x[1].size(1) for x in batch])
+        num_mels = batch[0][1].size(0)
 
-        # include Spec padded and gate padded
-        mel_padded = torch.zeros(len(batch), num_mels, max_target_len)
-        output_lengths = torch.LongTensor(len(batch))
-        for i in range(len(ids_sorted_decreasing)):
-            mel = batch[ids_sorted_decreasing[i]][1]
-            mel_padded[i, :, :mel.size(1)] = mel
-            output_lengths[i] = mel.size(1)
+        if self.stage==0:
+            text_padded = torch.zeros(len(batch), max_input_len, dtype=torch.long)
+            mel_padded = torch.zeros(len(batch), num_mels, max_target_len)
+            output_lengths = torch.LongTensor(len(batch))
 
+            for i in range(len(ids_sorted_decreasing)):
+                text = batch[ids_sorted_decreasing[i]][0]
+                text_padded[i, :text.size(0)] = text
+                mel = batch[ids_sorted_decreasing[i]][1]
+                mel_padded[i, :, :mel.size(1)] = mel
+                output_lengths[i] = mel.size(1)
+
+            return text_padded, mel_padded, input_lengths, output_lengths
         
-        return text_padded, input_lengths, mel_padded, output_lengths
+        
+        else:
+            text_padded = torch.zeros(len(batch), max_input_len, dtype=torch.long)
+            mel_padded = torch.zeros(len(batch), num_mels, max_target_len)
+            align_padded = torch.zeros(len(batch), max_input_len, max_target_len)
+            output_lengths = torch.LongTensor(len(batch))
+
+            for i in range(len(ids_sorted_decreasing)):
+                text = batch[ids_sorted_decreasing[i]][0]
+                text_padded[i, :text.size(0)] = text
+                mel = batch[ids_sorted_decreasing[i]][1]
+                mel_padded[i, :, :mel.size(1)] = mel
+                output_lengths[i] = mel.size(1)
+                align = batch[ids_sorted_decreasing[i]][2]
+                align_padded[i, :align.size(0), :align.size(1)] = align
+
+            return text_padded, mel_padded, align_padded, input_lengths, output_lengths
+
+    
+    
+    
+    
+    
+    

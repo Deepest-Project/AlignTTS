@@ -77,50 +77,61 @@ class Model(nn.Module):
         durations = self.DurationPredictor(encoder_input, text_lengths).exp()
         return durations
     
-    def get_melspec(self, hidden_states, probable_path, mel_lengths, inference=False):
-        # probable_path: B, T
-        indices = hidden_states.new_tensor(torch.arange(probable_path.max()+1).view(1,1,-1)) # 1, 1, L
-        path_onehot = 1.0*(hidden_states.new_tensor(indices==probable_path.unsqueeze(-1))) # B, T, L
-        hidden_states_expanded = torch.matmul(path_onehot, hidden_states)
+    def get_melspec(self, hidden_states, align, mel_lengths, inference=False):
+        hidden_states_expanded = torch.matmul(align.transpose(1,2), hidden_states)
         hidden_states_expanded += self.Prenet.pe[:hidden_states_expanded.size(1)].unsqueeze(1).transpose(0,1)
         mel_out = self.Projection(self.FFT_upper(hidden_states_expanded, mel_lengths)[0]).transpose(1,2)
         return mel_out
     
-    def forward(self, text, melspec, probable_path, text_lengths, mel_lengths, criterion, stage):
+    def forward(self, text, melspec, align, text_lengths, mel_lengths, criterion, stage):
         text = text[:,:text_lengths.max().item()]
         melspec = melspec[:,:,:mel_lengths.max().item()]
         if stage==0:
             encoder_input = self.Prenet(text)
             hidden_states, _ = self.FFT_lower(encoder_input, text_lengths)
             mu_sigma = self.get_mu_sigma(hidden_states)
-            mdn_loss, _, _, _ = criterion(mu_sigma, melspec, text_lengths, mel_lengths)
+            mdn_loss, _ = criterion(mu_sigma, melspec, text_lengths, mel_lengths)
             return mdn_loss
         
         elif stage==1:
+            align = align[:, :text_lengths.max().item(), :mel_lengths.max().item()]
             encoder_input = self.Prenet(text)
-            hidden_states, _ = FFT_lower(encoder_input, text_lengths)
-            mel_out = get_melspec(hidden_states, probable_path, mel_lengths)
+            hidden_states, _ = self.FFT_lower(encoder_input, text_lengths)
+            mel_out = self.get_melspec(hidden_states, align, mel_lengths)
+            
+            mel_mask = ~get_mask_from_lengths(mel_lengths)
+            melspec = melspec.masked_select(mel_mask.unsqueeze(1))
+            mel_out = mel_out.masked_select(mel_mask.unsqueeze(1))
             fft_loss = nn.L1Loss()(mel_out, melspec)
+            
             return fft_loss
         
         elif stage==2:
             encoder_input = self.Prenet(text)
             hidden_states, _ = self.FFT_lower(encoder_input, text_lengths)
             mu_sigma = self.get_mu_sigma(hidden_states)
-            mdn_loss, log_prob_matrix, _, _ = criterion(mu_sigma, melspec, text_lengths, mel_lengths)
+            mdn_loss, log_prob_matrix = criterion(mu_sigma, melspec, text_lengths, mel_lengths)
             
-            probable_path = self.viterbi(log_prob_matrix, text_lengths, mel_lengths) # B, T
-            mel_out = self.get_melspec(hidden_states, probable_path, mel_lengths)
+            align = self.viterbi(log_prob_matrix, text_lengths, mel_lengths) # B, T
+            mel_out = self.get_melspec(hidden_states, align, mel_lengths)
+            
+            mel_mask = ~get_mask_from_lengths(mel_lengths)
+            melspec = melspec.masked_select(mel_mask.unsqueeze(1))
+            mel_out = mel_out.masked_select(mel_mask.unsqueeze(1))
             fft_loss = nn.L1Loss()(mel_out, melspec)
+            
             return mdn_loss + fft_loss
         
         elif stage==3:
             encoder_input = self.Prenet(text)
             durations_out = self.get_duration(encoder_input.data, text_lengths) # gradient cut
+            duration_target = self.align2duration(align, mel_lengths)
             
-            path_onehot = 1.0*(hidden_states.new_tensor(torch.arange(probable_path.max()+1)).unsqueeze(-1)==probable_path) # B, T, L
-            target_durations = self.align2duration(path_onehot, mel_mask)
-            duration_loss = nn.L2Loss(torch.log(durations_out), torch.log(target_durations))
+            duration_mask = ~get_mask_from_lengths(text_lengths)
+            duration_target = duration_target.masked_select(duration_mask)
+            duration_out = duration_out.masked_select(duration_mask)
+            duration_loss = nn.L2Loss(torch.log(durations_out), torch.log(duration_target))
+
             return duration_loss
         
         
@@ -129,7 +140,13 @@ class Model(nn.Module):
         encoder_input = self.Prenet(text)
         hidden_states, _ = self.FFT_lower(encoder_input, text_lengths)
         durations = self.get_duration(encoder_input, text_lengths)
-        mel_out = self.get_melspec(hidden_states, durations, mel_lengths, inference=True)
+        durations = torch.round(durations*alpha).to(torch.long)
+        durations[durations<=0]=1
+        T=int(durations.sum().item())
+        hidden_states_expanded = torch.repeat_interleave(hidden_states, durations[0], dim=1)
+        hidden_states_expanded += self.Prenet.pe[:hidden_states_expanded.size(1)].unsqueeze(1).transpose(0,1)
+        mel_out = self.Projection(self.FFT_upper(hidden_states_expanded, mel_lengths)[0]).transpose(1,2)
+        
         return mel_out, durations
     
     
@@ -154,12 +171,20 @@ class Model(nn.Module):
 
         path.reverse()
         path = torch.stack(path, -1)
-        return path
         
+        indices = path.new_tensor(torch.arange(path.max()+1).view(1,1,-1)) # 1, 1, L
+        align = 1.0*(path.new_tensor(indices==path.unsqueeze(-1))) # B, T, L
+        
+        for i in range(align.size(0)):
+            pad= T-mel_lengths[i]
+            align[i] = F.pad(align[i], (0,0,-pad,pad))
+            
+        return align.transpose(1,2)
     
-    def align2duration(self, alignments, mel_lengths):
-        ids = alignments.new_tensor( torch.arange(alignments.size(2)) )
-        max_ids = torch.max(alignments, dim=2)[1].unsqueeze(-1)
+    
+    def align2duration(self, align, mel_lengths):
+        ids = align.new_tensor( torch.arange(align.size(2)) )
+        max_ids = torch.max(align, dim=2)[1].unsqueeze(-1)
         mel_mask = get_mask_from_lengths(mel_lengths)
         one_hot = 1.0*(ids==max_ids)
         one_hot.masked_fill_(mel_mask.unsqueeze(2), 0)
@@ -167,3 +192,5 @@ class Model(nn.Module):
         durations = torch.sum(one_hot, dim=1)
 
         return durations
+    
+    

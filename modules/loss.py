@@ -18,10 +18,10 @@ class MDNLoss(nn.Module):
         
         x = melspec.transpose(1,2).unsqueeze(1) # B, 1, T, F
         mu = torch.sigmoid(mu_sigma[:, :, :hp.n_mel_channels].unsqueeze(2)) # B, L, 1, F
-        sigma = torch.exp(mu_sigma[:, :, hp.n_mel_channels:].unsqueeze(2)) # B, L, 1, F
+        log_sigma = mu_sigma[:, :, hp.n_mel_channels:].unsqueeze(2) # B, L, 1, F
     
-        exponential = -0.5*torch.sum((x-mu)*(x-mu)/sigma**2, dim=-1) # B, L, T
-        log_prob_matrix = exponential - (hp.n_mel_channels/2)*torch.log(torch.tensor(2*math.pi)) - 0.5 * torch.log(sigma).sum(dim=-1)
+        exponential = -0.5*torch.sum((x-mu)*(x-mu)/log_sigma.exp()**2, dim=-1) # B, L, T
+        log_prob_matrix = exponential - (hp.n_mel_channels/2)*torch.log(torch.tensor(2*math.pi)) - 0.5 * log_sigma.sum(dim=-1)
         log_alpha = mu_sigma.new_ones(B, L, T)*(-1e30)
         log_alpha[:,0, 0] = log_prob_matrix[:,0, 0]
         
@@ -32,5 +32,5 @@ class MDNLoss(nn.Module):
         alpha_last = log_alpha[torch.arange(B), text_lengths-1, mel_lengths-1]
         mdn_loss = -alpha_last.mean()
 
-        return mdn_loss, log_prob_matrix, log_alpha, alpha_last
+        return mdn_loss, log_prob_matrix
         

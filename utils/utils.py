@@ -6,14 +6,13 @@ from text import *
 import matplotlib.pyplot as plt
 
 
-def prepare_dataloaders(hparams):
+def prepare_dataloaders(hparams, stage):
     # Get data, data loaders and collate function ready
-    trainset = TextMelSet(hparams.training_files, hparams)
-    valset = TextMelSet(hparams.validation_files, hparams)
-    collate_fn = TextMelCollate()
+    trainset = TextMelSet(hparams.training_files, hparams, stage)
+    valset = TextMelSet(hparams.validation_files, hparams, stage)
+    collate_fn = TextMelCollate(stage)
 
     train_loader = DataLoader(trainset,
-                              num_workers=hparams.n_gpus-1,
                               shuffle=True,
                               batch_size=hparams.batch_size, 
                               drop_last=True, 
@@ -55,3 +54,14 @@ def reorder_batch(x, n_gpus):
         new_x[i::n_gpus] = x[i*chunk_size:(i+1)*chunk_size]
     
     return new_x
+
+
+
+def decode_text(padded_text, text_lengths, batch_idx=0):
+    
+    text = padded_text[batch_idx]
+    text_len = text_lengths[batch_idx]
+    
+    text = ''.join([symbols[ci] for i, ci in enumerate(text) if i < text_len])
+    
+    return text
