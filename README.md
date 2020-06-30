@@ -24,3 +24,6 @@ Implementation of the [AlignTTS](https://arxiv.org/abs/2003.01950)
 
 ## Alignment Smaple
 <img src="figures/align.png">  
+
+## Audio Samples    
+You can hear the audio samples [here](https://deepest-project.github.io/AlignTTS)
