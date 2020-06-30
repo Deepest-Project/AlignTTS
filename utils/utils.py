@@ -65,3 +65,12 @@ def decode_text(padded_text, text_lengths, batch_idx=0):
     text = ''.join([symbols[ci] for i, ci in enumerate(text) if i < text_len])
     
     return text
+
+def display_hparams(hparams):
+    
+    hparam_list = ([(item, getattr(hparams, item)) for item in dir(hparams) if not item.startswith("__")])
+
+    for key, item in hparam_list:
+        print(f'{key:>20}: {item}')
+        
+    

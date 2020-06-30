@@ -1,0 +1,5 @@
+*.pyc
+.ipynb_checkpoints/
+runs/
+training_log/
+nohup.out

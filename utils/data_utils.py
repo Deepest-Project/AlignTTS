@@ -9,6 +9,8 @@ import pickle as pkl
 
 from text import text_to_sequence
 
+import matplotlib.pyplot as plt
+
 
 def load_filepaths_and_text(metadata, split="|"):
     with open(metadata, encoding='utf-8') as f:
@@ -102,6 +104,13 @@ class TextMelCollate():
                 mel_padded[i, :, :mel.size(1)] = mel
                 output_lengths[i] = mel.size(1)
                 align = batch[ids_sorted_decreasing[i]][2]
+                align = align.T
+                
+#                 print(align.shape, align_padded.shape, text.shape, mel.shape)
+#                 plt.figure()
+#                 plt.imshow(align.cpu())
+#                 plt.show()
+                
                 align_padded[i, :align.size(0), :align.size(1)] = align
 
             return text_padded, mel_padded, align_padded, input_lengths, output_lengths
