@@ -19,18 +19,22 @@ class TTSWriter(SummaryWriter):
     def __init__(self, log_dir):
         super(TTSWriter, self).__init__(log_dir)
         
-    def add_losses(self, mdn_loss, global_step, phase):
-        self.add_scalar(f'{phase}_mdn_loss', mdn_loss, global_step)
+    def add_specs(self, mel_target, mel_out, global_step, phase):
+        fig, axes = plt.subplots(2, 1, figsize=(20,20))
+
+        axes[0].imshow(mel_target,
+                       origin='lower',
+                       aspect='auto')
+
+        axes[1].imshow(mel_out,
+                       origin='lower',
+                       aspect='auto')
+    
+        self.add_figure(f'{phase}_melspec', fig, global_step)
         
-    def add_specs(self, mel_padded, mel_out, mel_lengths, global_step, phase):
-        mel_fig = plot_melspec(mel_padded, mel_out, mel_lengths)
-        self.add_figure(f'{phase}_melspec', mel_fig, global_step)
-        
-    def add_alignments(self, probable_path, text_lengths, mel_lengths, global_step, phase):
-        L, T = text_lengths[-1], mel_lengths[-1]
-        align = probable_path[-1].contiguous()
-        
+    def add_alignments(self, alignment, global_step, phase):
         fig = plt.plot(figsize=(20,10))
-        fig.imshow(align[:L, :T], origin='lower', aspect='auto')
-        fig.xaxis.tick_top()
-        self.add_figure(f'{phase}_enc_alignments', fig, global_step)
+        plt.imshow(alignment, origin='lower', aspect='auto')
+        self.add_figure(f'{phase}_alignments', fig, global_step)
+        
+        

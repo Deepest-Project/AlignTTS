@@ -47,7 +47,7 @@ warmup_steps=4000
 grad_clip_thresh=1.0
 batch_size=32
 accumulation=1
-iters_per_validation=4000
+iters_per_validation=1000
 iters_per_checkpoint=10000
 train_steps = [40000, 40000, 80000, 10000]
 

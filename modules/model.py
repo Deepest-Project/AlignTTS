@@ -9,6 +9,7 @@ from utils.utils import get_mask_from_lengths
 class Prenet(nn.Module):
     def __init__(self, hp):
         super(Prenet, self).__init__()
+        # B, L -> B, L, D
         self.Embedding = nn.Embedding(hp.n_symbols, hp.symbols_embedding_dim)
         self.register_buffer('pe', PositionalEncoding(hp.hidden_dim).pe)
         self.dropout = nn.Dropout(0.1)
@@ -28,8 +29,8 @@ class FFT(nn.Module):
                                                                  nhead=n_heads,
                                                                  dim_feedforward=ff_dim)
                                       for _ in range(n_layers)])
-
     def forward(self, x, lengths):
+        # B, L, D -> B, L, D
         alignments = []
         x = x.transpose(0,1)
         mask = get_mask_from_lengths(lengths)
@@ -44,13 +45,15 @@ class FFT(nn.Module):
 class DurationPredictor(nn.Module):
     def __init__(self, hp):
         super(DurationPredictor, self).__init__()
-        self.FFT = FFT(hp.hidden_dim, hp.n_heads, hp.ff_dim, hp.n_layers)
+        self.Prenet = Prenet(hp)
+        self.FFT = FFT(hp.hidden_dim, hp.n_heads, hp.ff_dim, 2)
         self.linear = Linear(hp.hidden_dim, 1)
 
-    def forward(self, encoder_input, text_lengths):
-        x = encoder_input.transpose(0,1)
-        x = self.FFT(encoder_input, text_lengths).transpose(0,1)
-        x = self.linear(x)
+    def forward(self, text, text_lengths):
+        # B, L -> B, L
+        encoder_input = self.Prenet(text)
+        x = self.FFT(encoder_input, text_lengths)[0]
+        x = self.linear(x).squeeze(-1)
         return x
 
     
@@ -61,11 +64,11 @@ class Model(nn.Module):
         self.Prenet = Prenet(hp)
         self.FFT_lower = FFT(hp.hidden_dim, hp.n_heads, hp.ff_dim, hp.n_layers)
         self.FFT_upper = FFT(hp.hidden_dim, hp.n_heads, hp.ff_dim, hp.n_layers)
-        self.MDN = nn.Sequential(Linear(hp.hidden_dim, 256),
-                                 nn.LayerNorm(256),
+        self.MDN = nn.Sequential(Linear(hp.hidden_dim, hp.hidden_dim),
+                                 nn.LayerNorm(hp.hidden_dim),
                                  nn.ReLU(),
                                  nn.Dropout(0.1),
-                                 Linear(256, 2*hp.n_mel_channels))
+                                 Linear(hp.hidden_dim, 2*hp.n_mel_channels))
         self.DurationPredictor = DurationPredictor(hp)
         self.Projection = Linear(hp.hidden_dim, hp.n_mel_channels)
 
@@ -73,11 +76,11 @@ class Model(nn.Module):
         mu_sigma = self.MDN(hidden_states)
         return mu_sigma
     
-    def get_duration(self, encoder_input, text_lengths):
-        durations = self.DurationPredictor(encoder_input, text_lengths).exp()
+    def get_duration(self, text, text_lengths):
+        durations = self.DurationPredictor(text, text_lengths).exp()
         return durations
     
-    def get_melspec(self, hidden_states, align, mel_lengths, inference=False):
+    def get_melspec(self, hidden_states, align, mel_lengths):
         hidden_states_expanded = torch.matmul(align.transpose(1,2), hidden_states)
         hidden_states_expanded += self.Prenet.pe[:hidden_states_expanded.size(1)].unsqueeze(1).transpose(0,1)
         mel_out = self.Projection(self.FFT_upper(hidden_states_expanded, mel_lengths)[0]).transpose(1,2)
@@ -86,6 +89,7 @@ class Model(nn.Module):
     def forward(self, text, melspec, align, text_lengths, mel_lengths, criterion, stage):
         text = text[:,:text_lengths.max().item()]
         melspec = melspec[:,:,:mel_lengths.max().item()]
+        
         if stage==0:
             encoder_input = self.Prenet(text)
             hidden_states, _ = self.FFT_lower(encoder_input, text_lengths)
@@ -123,26 +127,27 @@ class Model(nn.Module):
             return mdn_loss + fft_loss
         
         elif stage==3:
-            encoder_input = self.Prenet(text)
-            durations_out = self.get_duration(encoder_input.data, text_lengths) # gradient cut
-            duration_target = self.align2duration(align, mel_lengths)
+            align = align[:, :text_lengths.max().item(), :mel_lengths.max().item()]
+            duration_out = self.get_duration(text, text_lengths) # gradient cut
+            duration_target = align.sum(-1)
             
             duration_mask = ~get_mask_from_lengths(text_lengths)
             duration_target = duration_target.masked_select(duration_mask)
             duration_out = duration_out.masked_select(duration_mask)
-            duration_loss = nn.L2Loss(torch.log(durations_out), torch.log(duration_target))
+            duration_loss = nn.MSELoss()(torch.log(duration_out), torch.log(duration_target))
 
             return duration_loss
         
         
     def inference(self, text, alpha=1.0):
-        text_lengths = torch.tensor([1, text.size(1)])
+        text_lengths = text.new_tensor([text.size(1)])
         encoder_input = self.Prenet(text)
         hidden_states, _ = self.FFT_lower(encoder_input, text_lengths)
-        durations = self.get_duration(encoder_input, text_lengths)
+        durations = self.get_duration(text, text_lengths)
         durations = torch.round(durations*alpha).to(torch.long)
         durations[durations<=0]=1
         T=int(durations.sum().item())
+        mel_lengths = text.new_tensor([T])
         hidden_states_expanded = torch.repeat_interleave(hidden_states, durations[0], dim=1)
         hidden_states_expanded += self.Prenet.pe[:hidden_states_expanded.size(1)].unsqueeze(1).transpose(0,1)
         mel_out = self.Projection(self.FFT_upper(hidden_states_expanded, mel_lengths)[0]).transpose(1,2)
@@ -180,17 +185,4 @@ class Model(nn.Module):
             align[i] = F.pad(align[i], (0,0,-pad,pad))
             
         return align.transpose(1,2)
-    
-    
-    def align2duration(self, align, mel_lengths):
-        ids = align.new_tensor( torch.arange(align.size(2)) )
-        max_ids = torch.max(align, dim=2)[1].unsqueeze(-1)
-        mel_mask = get_mask_from_lengths(mel_lengths)
-        one_hot = 1.0*(ids==max_ids)
-        one_hot.masked_fill_(mel_mask.unsqueeze(2), 0)
-        
-        durations = torch.sum(one_hot, dim=1)
-
-        return durations
-    
     

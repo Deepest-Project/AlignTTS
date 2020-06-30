@@ -19,32 +19,42 @@ def load_filepaths_and_text(metadata, split="|"):
 class TextMelSet(torch.utils.data.Dataset):
     def __init__(self, audiopaths_and_text, hparams, stage):
         self.audiopaths_and_text = load_filepaths_and_text(audiopaths_and_text)
-        random.seed(1234)
-        random.shuffle(self.audiopaths_and_text)
         self.data_type=hparams.data_type
         self.stage=stage
-
-    def get_mel_text_pair(self, audiopath_and_text):
-        # separate filename and text
-        file_name = audiopath_and_text[0][:10]
-        seq = os.path.join(hparams.data_path, self.data_type)
-        mel = os.path.join(hparams.data_path, 'melspectrogram')
-        with open(f'{seq}/{file_name}_sequence.pkl', 'rb') as f:
-            text = pkl.load(f)
-        with open(f'{mel}/{file_name}_melspectrogram.pkl', 'rb') as f:
-            mel = pkl.load(f)
+        
+        self.text_dataset = []
+        self.align_dataset = []
+        seq_path = os.path.join(hparams.data_path, self.data_type)
+        align_path = os.path.join(hparams.data_path, 'alignments')
+        for data in self.audiopaths_and_text:
+            file_name = data[0][:10]
+            text = torch.from_numpy(np.load(f'{seq_path}/{file_name}_sequence.npy'))
+            self.text_dataset.append(text)
+            
+            if stage !=0:
+                align = torch.from_numpy(np.load(f'{align_path}/{file_name}_alignment.npy'))
+                self.align_dataset.append(align)
+            
+            
+    def get_mel_text_pair(self, index):
+        file_name = self.audiopaths_and_text[index][0][:10]
+        
+        text = self.text_dataset[index]
+        mel_path = os.path.join(hparams.data_path, 'melspectrogram')
+        mel = torch.from_numpy(np.load(f'{mel_path}/{file_name}_melspectrogram.npy'))
         
         if self.stage == 0:
             return (text, mel)
         
         else:
-            align = os.path.join(hparams.data_path, 'alignments')
-            with open(f'{align}/{file_name}.pkl', 'rb') as f:
-                align = pkl.load(f)
+            align = self.align_dataset[index]
+            align = torch.repeat_interleave(torch.eye(len(align)).to(torch.long),
+                                            align,
+                                            dim=1)
             return (text, mel, align)
 
     def __getitem__(self, index):
-        return self.get_mel_text_pair(self.audiopaths_and_text[index])
+        return self.get_mel_text_pair(index)
 
     def __len__(self):
         return len(self.audiopaths_and_text)

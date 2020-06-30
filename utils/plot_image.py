@@ -4,15 +4,14 @@ import hparams
 import matplotlib.pyplot as plt
 
 
-def plot_melspec(target, melspec, mel_lengths):
+def plot_melspec(mel_target, mel_out):
     fig, axes = plt.subplots(2, 1, figsize=(20,20))
-    T = mel_lengths[-1]
 
-    axes[0].imshow(target[-1][:,:T],
+    axes[0].imshow(mel_target,
                    origin='lower',
                    aspect='auto')
 
-    axes[1].imshow(melspec[-1][:,:T],
+    axes[1].imshow(mel_out,
                    origin='lower',
                    aspect='auto')
 

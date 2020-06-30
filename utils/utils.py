@@ -4,7 +4,6 @@ from .data_utils import TextMelSet, TextMelCollate
 import torch
 from text import *
 import matplotlib.pyplot as plt
-from glob import glob
 
 
 def prepare_dataloaders(hparams, stage):
@@ -32,29 +31,6 @@ def save_checkpoint(model, optimizer, learning_rate, iteration, filepath):
                 'state_dict': model.state_dict(),
                 'optimizer': optimizer.state_dict(),
                 'learning_rate': learning_rate}, f'{filepath}/checkpoint_{iteration}')
-    
-def load_checkpoint(model, optimizer, iteration, filepath):
-    
-    if iteration is None:
-        full_path = sorted(glob(f'{filepath}/checkpoint_*'))[-1]
-    else:
-        full_path = f'{filepath}/checkpoint_{iteration}'
-    
-    print(f"Loading model and optimizer state at {full_path}")    
-    
-    try:
-        checkpoint = torch.load(full_path)
-    except:
-        print(f"Failed in loading file: {full_path}")
-        return None, None
-        
-    
-    model.load_state_dict(checkpoint['state_dict'])
-    optimizer.load_state_dict(checkpoint['optimizer'])
-    iteration = checkpoint['iteration']
-    learning_rate = checkpoint['learning_rate']
-    
-    return iteration, learning_rate
 
     
 def lr_scheduling(opt, step, init_lr=hparams.lr, warmup_steps=hparams.warmup_steps):

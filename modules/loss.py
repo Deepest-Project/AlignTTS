@@ -3,7 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import hparams as hp
 from utils.utils import get_mask_from_lengths
-from torch.distributions import MultivariateNormal
 import math
 
 
@@ -17,7 +16,7 @@ class MDNLoss(nn.Module):
         T = melspec.size(2)
         
         x = melspec.transpose(1,2).unsqueeze(1) # B, 1, T, F
-        mu = torch.sigmoid(mu_sigma[:, :, :hp.n_mel_channels].unsqueeze(2)) # B, L, 1, F
+        mu = mu_sigma[:, :, :hp.n_mel_channels].unsqueeze(2) # B, L, 1, F
         log_sigma = mu_sigma[:, :, hp.n_mel_channels:].unsqueeze(2) # B, L, 1, F
     
         exponential = -0.5*torch.sum((x-mu)*(x-mu)/log_sigma.exp()**2, dim=-1) # B, L, T
@@ -33,4 +32,3 @@ class MDNLoss(nn.Module):
         mdn_loss = -alpha_last.mean()
 
         return mdn_loss, log_prob_matrix
-        
