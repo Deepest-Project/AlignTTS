@@ -30,7 +30,12 @@ class TextMelSet(torch.utils.data.Dataset):
         align_path = os.path.join(hparams.data_path, 'alignments')
         for data in self.audiopaths_and_text:
             file_name = data[0][:10]
-            text = torch.from_numpy(np.load(f'{seq_path}/{file_name}_sequence.npy'))
+            try:
+                text = torch.from_numpy(np.load(f'{seq_path}/{file_name}_sequence.npy'))
+            except FileNotFoundError:
+                with open(f'{seq_path}/{file_name}_sequence.pkl', 'rb') as f:
+                    text = pkl.load(f)
+                
             self.text_dataset.append(text)
             
             if stage !=0:
@@ -43,7 +48,11 @@ class TextMelSet(torch.utils.data.Dataset):
         
         text = self.text_dataset[index]
         mel_path = os.path.join(hparams.data_path, 'melspectrogram')
-        mel = torch.from_numpy(np.load(f'{mel_path}/{file_name}_melspectrogram.npy'))
+        try:
+            mel = torch.from_numpy(np.load(f'{mel_path}/{file_name}_melspectrogram.npy'))
+        except FileNotFoundError:
+            with open(f'{mel_path}/{file_name}_melspectrogram.pkl', 'rb') as f:
+                mel = pkl.load(f)
         
         if self.stage == 0:
             return (text, mel)
