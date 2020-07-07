@@ -16,7 +16,7 @@ class MDNLoss(nn.Module):
         T = melspec.size(2)
         
         x = melspec.transpose(1,2).unsqueeze(1) # B, 1, T, F
-        mu = mu_sigma[:, :, :hp.n_mel_channels].unsqueeze(2) # B, L, 1, F
+        mu = torch.sigmoid(mu_sigma[:, :, :hp.n_mel_channels].unsqueeze(2)) # B, L, 1, F
         log_sigma = mu_sigma[:, :, hp.n_mel_channels:].unsqueeze(2) # B, L, 1, F
     
         exponential = -0.5*torch.sum((x-mu)*(x-mu)/log_sigma.exp()**2, dim=-1) # B, L, T
