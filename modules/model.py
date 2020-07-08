@@ -186,3 +186,70 @@ class Model(nn.Module):
             
         return align.transpose(1,2)
     
+    def fast_viterbi(self, log_prob_matrix, text_lengths, mel_lengths):
+        B, L, T = log_prob_matrix.size()
+        
+        _log_prob_matrix = log_prob_matrix.cpu()
+
+        curr_rows = text_lengths.cpu().to(torch.long)-1
+        curr_cols = mel_lengths.cpu().to(torch.long)-1
+        
+        path = [curr_rows*1]       
+        
+        for _ in range(T-1):
+#             print(curr_rows-1)
+#             print(curr_cols-1)
+            is_go = _log_prob_matrix[torch.arange(B), curr_rows-1, curr_cols-1]\
+                     > _log_prob_matrix[torch.arange(B), curr_rows, curr_cols-1]
+#             curr_rows = F.relu(curr_rows-1*is_go+1)-1
+#             curr_cols = F.relu(curr_cols)-1
+            curr_rows = F.relu(curr_rows-1*is_go+1)-1
+            curr_cols = F.relu(curr_cols-1+1)-1
+            path.append(curr_rows*1)
+
+        path.reverse()
+        path = torch.stack(path, -1)
+        
+        indices = path.new_tensor(torch.arange(path.max()+1).view(1,1,-1)) # 1, 1, L
+        align = 1.0*(path.new_tensor(indices==path.unsqueeze(-1))) # B, T, L
+        
+        for i in range(align.size(0)):
+            pad= T-mel_lengths[i]
+            align[i] = F.pad(align[i], (0,0,-pad,pad))
+            
+        return align.transpose(1,2)
+    
+    def viterbi_cpu(self, log_prob_matrix, text_lengths, mel_lengths):
+        B, L, T = log_prob_matrix.size()
+        
+        _log_prob_matrix = log_prob_matrix.cpu()
+        
+        log_beta = _log_prob_matrix.new_ones(B, L, T)*(-1e15)
+        log_beta[:, 0, 0] = _log_prob_matrix[:, 0, 0]
+
+        for t in range(1, T):
+            prev_step = torch.cat([log_beta[:, :, t-1:t], F.pad(log_beta[:, :, t-1:t], (0,0,1,-1), value=-1e15)], dim=-1).max(dim=-1)[0]
+            log_beta[:, :, t] = prev_step+_log_prob_matrix[:, :, t]
+
+        curr_rows = text_lengths-1
+        curr_cols = mel_lengths-1
+        path = [curr_rows*1]
+        for _ in range(T-1):
+            is_go = log_beta[torch.arange(B), curr_rows-1, curr_cols-1]\
+                     > log_beta[torch.arange(B), curr_rows, curr_cols-1]
+            curr_rows = F.relu(curr_rows - 1 * is_go + 1) - 1
+            curr_cols = F.relu(curr_cols) - 1
+            path.append(curr_rows*1)
+
+        path.reverse()
+        path = torch.stack(path, -1)
+        
+        indices = path.new_tensor(torch.arange(path.max()+1).view(1,1,-1)) # 1, 1, L
+        align = 1*(path.new_tensor(indices==path.unsqueeze(-1))) # B, T, L
+        
+        for i in range(align.size(0)):
+            pad= T-mel_lengths[i]
+            align[i] = F.pad(align[i], (0,0,-pad,pad))
+            
+        return align.transpose(1,2)
+    
