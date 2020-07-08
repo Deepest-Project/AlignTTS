@@ -39,7 +39,7 @@ def validate(model, criterion, val_loader, iteration, writer, stage):
                     loss, log_prob_matrix = criterion(mu_sigma, mel_padded, text_lengths, mel_lengths)
                     
                 elif stage==1:
-                    mel_out = model.module.get_melspec(hidden_states, align, mel_lengths)
+                    mel_out = model.module.get_melspec(hidden_states, align_padded, mel_lengths)
                     mel_mask = ~get_mask_from_lengths(mel_lengths)
                     mel_padded_selected = mel_padded.masked_select(mel_mask.unsqueeze(1))
                     mel_out_selected = mel_out.masked_select(mel_mask.unsqueeze(1))
