@@ -60,7 +60,6 @@ class DurationPredictor(nn.Module):
 class Model(nn.Module):
     def __init__(self, hp):
         super(Model, self).__init__()
-        self.hp = hp
         self.Prenet = Prenet(hp)
         self.FFT_lower = FFT(hp.hidden_dim, hp.n_heads, hp.ff_dim, hp.n_layers)
         self.FFT_upper = FFT(hp.hidden_dim, hp.n_heads, hp.ff_dim, hp.n_layers)
@@ -83,7 +82,7 @@ class Model(nn.Module):
     def get_melspec(self, hidden_states, align, mel_lengths):
         hidden_states_expanded = torch.matmul(align.transpose(1,2), hidden_states)
         hidden_states_expanded += self.Prenet.pe[:hidden_states_expanded.size(1)].unsqueeze(1).transpose(0,1)
-        mel_out = self.Projection(self.FFT_upper(hidden_states_expanded, mel_lengths)[0]).transpose(1,2)
+        mel_out = torch.sigmoid(self.Projection(self.FFT_upper(hidden_states_expanded, mel_lengths)[0]).transpose(1,2))
         return mel_out
     
     def forward(self, text, melspec, align, text_lengths, mel_lengths, criterion, stage):
@@ -150,7 +149,7 @@ class Model(nn.Module):
         mel_lengths = text.new_tensor([T])
         hidden_states_expanded = torch.repeat_interleave(hidden_states, durations[0], dim=1)
         hidden_states_expanded += self.Prenet.pe[:hidden_states_expanded.size(1)].unsqueeze(1).transpose(0,1)
-        mel_out = self.Projection(self.FFT_upper(hidden_states_expanded, mel_lengths)[0]).transpose(1,2)
+        mel_out = torch.sigmoid(self.Projection(self.FFT_upper(hidden_states_expanded, mel_lengths)[0]).transpose(1,2))
         
         return mel_out, durations
     

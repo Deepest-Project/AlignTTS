@@ -9,8 +9,6 @@ import pickle as pkl
 
 from text import text_to_sequence
 
-import matplotlib.pyplot as plt
-
 
 def load_filepaths_and_text(metadata, split="|"):
     with open(metadata, encoding='utf-8') as f:
@@ -30,12 +28,7 @@ class TextMelSet(torch.utils.data.Dataset):
         align_path = os.path.join(hparams.data_path, 'alignments')
         for data in self.audiopaths_and_text:
             file_name = data[0][:10]
-            try:
-                text = torch.from_numpy(np.load(f'{seq_path}/{file_name}_sequence.npy'))
-            except FileNotFoundError:
-                with open(f'{seq_path}/{file_name}_sequence.pkl', 'rb') as f:
-                    text = pkl.load(f)
-                
+            text = torch.from_numpy(np.load(f'{seq_path}/{file_name}_sequence.npy'))
             self.text_dataset.append(text)
             
             if stage !=0:
@@ -48,11 +41,7 @@ class TextMelSet(torch.utils.data.Dataset):
         
         text = self.text_dataset[index]
         mel_path = os.path.join(hparams.data_path, 'melspectrogram')
-        try:
-            mel = torch.from_numpy(np.load(f'{mel_path}/{file_name}_melspectrogram.npy'))
-        except FileNotFoundError:
-            with open(f'{mel_path}/{file_name}_melspectrogram.pkl', 'rb') as f:
-                mel = pkl.load(f)
+        mel = torch.from_numpy(np.load(f'{mel_path}/{file_name}_melspectrogram.npy'))
         
         if self.stage == 0:
             return (text, mel)
@@ -96,6 +85,8 @@ class TextMelCollate():
                 mel = batch[ids_sorted_decreasing[i]][1]
                 mel_padded[i, :, :mel.size(1)] = mel
                 output_lengths[i] = mel.size(1)
+            
+            mel_padded = (torch.clamp(mel_padded, hparams.min_db, hparams.max_db)-hparams.min_db) / (hparams.max_db-hparams.min_db)
 
             return text_padded, mel_padded, input_lengths, output_lengths
         
@@ -113,20 +104,10 @@ class TextMelCollate():
                 mel_padded[i, :, :mel.size(1)] = mel
                 output_lengths[i] = mel.size(1)
                 align = batch[ids_sorted_decreasing[i]][2]
-                align = align.T
-                
-#                 print(align.shape, align_padded.shape, text.shape, mel.shape)
-#                 plt.figure()
-#                 plt.imshow(align.cpu())
-#                 plt.show()
-                
                 align_padded[i, :align.size(0), :align.size(1)] = align
-
+            
+            mel_padded = (torch.clamp(mel_padded, hparams.min_db, hparams.max_db)-hparams.min_db) / (hparams.max_db-hparams.min_db)
+               
             return text_padded, mel_padded, align_padded, input_lengths, output_lengths
 
-    
-    
-    
-    
-    
     

@@ -45,32 +45,22 @@ def get_mask_from_lengths(lengths):
     return mask
 
 
-def reorder_batch(x, n_gpus):
+def reorder_batch(x, n_gpus, base=0):
     assert (x.size(0)%n_gpus)==0, 'Batch size must be a multiple of the number of GPUs.'
-    new_x = x.new_zeros(x.size())
-    chunk_size = x.size(0)//n_gpus
+    base = base%n_gpus
+    new_x = list(torch.zeros_like(x).chunk(n_gpus))
+    for i in range(base, base+n_gpus):
+        new_x[i%n_gpus] = x[i-base::n_gpus]
     
-    for i in range(n_gpus):
-        new_x[i::n_gpus] = x[i*chunk_size:(i+1)*chunk_size]
+    new_x = torch.cat(new_x, dim=0)
     
     return new_x
 
 
 
 def decode_text(padded_text, text_lengths, batch_idx=0):
-    
     text = padded_text[batch_idx]
     text_len = text_lengths[batch_idx]
-    
     text = ''.join([symbols[ci] for i, ci in enumerate(text) if i < text_len])
     
     return text
-
-def display_hparams(hparams):
-    
-    hparam_list = ([(item, getattr(hparams, item)) for item in dir(hparams) if not item.startswith("__")])
-
-    for key, item in hparam_list:
-        print(f'{key:>20}: {item}')
-        
-    

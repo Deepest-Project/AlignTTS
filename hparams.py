@@ -29,8 +29,7 @@ mel_fmax=8000.0
 # Model Parameters             #
 ################################
 n_symbols=len(symbols)
-# data_type='phone_seq' # 'phone_seq'
-data_type='char_seq'
+data_type='phone_seq' # 'phone_seq'
 symbols_embedding_dim=256
 hidden_dim=256
 dprenet_dim=256
@@ -38,7 +37,8 @@ postnet_dim=256
 ff_dim=1024
 n_heads=2
 n_layers=6
-
+max_db=2
+min_db=-12
 
 ################################
 # Optimization Hyperparameters #
