@@ -7,9 +7,10 @@ def get_writer(output_directory, log_directory):
     
     if os.path.exists(logging_path):
         writer = TTSWriter(logging_path)
-        raise Exception('The experiment already exists')
+#         raise Exception('The experiment already exists')
+        print(f'The experiment {logging_path} already exists!')
     else:
-        os.mkdir(logging_path)
+        os.makedirs(logging_path)
         writer = TTSWriter(logging_path)
             
     return writer

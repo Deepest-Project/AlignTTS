@@ -12,6 +12,7 @@ from torch.utils.tensorboard import SummaryWriter
 import math
 import matplotlib.pyplot as plt
 from datetime import datetime
+from glob import glob
 
 
 def validate(model, criterion, val_loader, iteration, writer, stage):
@@ -104,6 +105,12 @@ def main(args):
 
     if args.stage!=0:
         checkpoint_path = f"training_log/aligntts/stage{args.stage-1}/checkpoint_{hparams.train_steps[args.stage-1]}"
+        
+        if not os.path.isfile(checkpoint_path):
+            print(f'{checkpoint_path} does not exist')
+            checkpoint_path = sorted(glob(f"training_log/aligntts/stage{args.stage-1}/checkpoint_*"))[-1]
+            print(f'Loading {checkpoint_path} instead')
+        
         state_dict = {}
         for k, v in torch.load(checkpoint_path)['state_dict'].items():
             state_dict[k[7:]]=v
@@ -142,11 +149,15 @@ def main(args):
                              text_lengths,
                              mel_lengths,
                              criterion,
-                             stage=args.stage)
+                             stage=args.stage,
+                             log_viterbi=args.log_viterbi,
+                             cpu_viterbi=args.cpu_viterbi)
             sub_loss = sub_loss.mean()/hparams.accumulation
             sub_loss.backward()
             loss = loss+sub_loss.item()
             iteration += 1
+            
+            print(f'[{str(datetime.now())}] Stage {args.stage} Iter {iteration:<6d} Loss {loss:<8.6f}')
 
             if iteration%hparams.accumulation == 0:
                 lr_scheduling(optimizer, iteration//hparams.accumulation)
@@ -180,6 +191,8 @@ if __name__ == '__main__':
     p.add_argument('--gpu', type=str, default='0,1')
     p.add_argument('-v', '--verbose', type=str, default='0')
     p.add_argument('--stage', type=int, required=True)
+    p.add_argument('--log_viterbi', type=bool, default=False)
+    p.add_argument('--cpu_viterbi', type=bool, default=False)
     args = p.parse_args()
     
     os.environ["CUDA_VISIBLE_DEVICES"]=args.gpu

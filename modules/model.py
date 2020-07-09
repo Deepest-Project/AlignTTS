@@ -5,6 +5,8 @@ from .init_layer import *
 from .transformer import *
 from utils.utils import get_mask_from_lengths
 
+from datetime import datetime
+from time import sleep
 
 class Prenet(nn.Module):
     def __init__(self, hp):
@@ -85,7 +87,7 @@ class Model(nn.Module):
         mel_out = torch.sigmoid(self.Projection(self.FFT_upper(hidden_states_expanded, mel_lengths)[0]).transpose(1,2))
         return mel_out
     
-    def forward(self, text, melspec, align, text_lengths, mel_lengths, criterion, stage):
+    def forward(self, text, melspec, align, text_lengths, mel_lengths, criterion, stage, log_viterbi=False, cpu_viterbi=False):
         text = text[:,:text_lengths.max().item()]
         melspec = melspec[:,:,:mel_lengths.max().item()]
         
@@ -115,7 +117,17 @@ class Model(nn.Module):
             mu_sigma = self.get_mu_sigma(hidden_states)
             mdn_loss, log_prob_matrix = criterion(mu_sigma, melspec, text_lengths, mel_lengths)
             
-            align = self.viterbi(log_prob_matrix, text_lengths, mel_lengths) # B, T
+            before = datetime.now()
+            if cpu_viterbi:
+                align = self.viterbi_cpu(log_prob_matrix, text_lengths.cpu(), mel_lengths.cpu()) # B, T
+            else:
+                align = self.viterbi(log_prob_matrix, text_lengths, mel_lengths) # B, T
+            after = datetime.now()    
+            
+            if log_viterbi:
+                time_delta = after - before
+                print(f'Viterbi took {time_delta.total_seconds()} secs')
+
             mel_out = self.get_melspec(hidden_states, align, mel_lengths)
             
             mel_mask = ~get_mask_from_lengths(mel_lengths)
@@ -219,6 +231,9 @@ class Model(nn.Module):
         return align.transpose(1,2)
     
     def viterbi_cpu(self, log_prob_matrix, text_lengths, mel_lengths):
+        
+        original_device = log_prob_matrix.device
+
         B, L, T = log_prob_matrix.size()
         
         _log_prob_matrix = log_prob_matrix.cpu()
@@ -244,11 +259,11 @@ class Model(nn.Module):
         path = torch.stack(path, -1)
         
         indices = path.new_tensor(torch.arange(path.max()+1).view(1,1,-1)) # 1, 1, L
-        align = 1*(path.new_tensor(indices==path.unsqueeze(-1))) # B, T, L
+        align = 1.0*(path.new_tensor(indices==path.unsqueeze(-1))) # B, T, L
         
         for i in range(align.size(0)):
             pad= T-mel_lengths[i]
             align[i] = F.pad(align[i], (0,0,-pad,pad))
             
-        return align.transpose(1,2)
+        return align.transpose(1,2).to(original_device)
     
